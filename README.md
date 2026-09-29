@@ -6,6 +6,7 @@
 <p align="center"><strong>A Parent Survival Tool</strong></p>
 
 <p align="center">
+  <a href="https://f-droid.org/packages/com.babytouchlock/"><img src="https://img.shields.io/f-droid/v/com.babytouchlock?logo=fdroid" alt="F-Droid" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
   <a href="https://android.com"><img src="https://img.shields.io/badge/Platform-Android%208.0%2B%20(API%2026%2B)-green.svg" alt="Platform" /></a>
   <a href="PRIVACY_POLICY.md"><img src="https://img.shields.io/badge/Permissions-Zero%20Internet-brightgreen.svg" alt="No Internet" /></a>
@@ -46,7 +47,16 @@ Tiny toddler hands love holding the screen by the edges, tapping everywhere, swi
 
 ## 📥 Download
 
-Download the latest ready-to-install APK from the **[Releases](https://github.com/dmici/baby-touch-lock/releases)** section.
+Install from **F-Droid** (recommended for automatic updates) or download the latest standalone APK directly from GitHub **[Releases](https://github.com/dmici/baby-touch-lock/releases)**.
+
+<p align="center">
+  <a href="https://f-droid.org/packages/com.babytouchlock/">
+    <img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
+         alt="Get it on F-Droid"
+         height="80">
+  </a>
+</p>
+
 
 ---
 
