@@ -66,6 +66,26 @@ class BabyTouchLockAccessibilityService : AccessibilityService() {
 
     private var pendingLockRunnable: Runnable? = null
 
+    // ─── Secret volume-button unlock combo ──────────────────────────────────
+    // Edit this to your own combo. VOLUME_UP = up, VOLUME_DOWN = down.
+    // Keep it 5+ presses so a toddler won't stumble onto it by mashing.
+    private val unlockSequence = listOf(
+        KeyEvent.KEYCODE_VOLUME_UP,
+        KeyEvent.KEYCODE_VOLUME_UP,
+        KeyEvent.KEYCODE_VOLUME_DOWN,
+        KeyEvent.KEYCODE_VOLUME_UP,
+        KeyEvent.KEYCODE_VOLUME_DOWN,
+        KeyEvent.KEYCODE_VOLUME_DOWN
+    )
+    // Each press must land within this gap of the previous one, or the buffer resets.
+    private val sequenceTimeoutMs = 3000L
+    private val keyBuffer = ArrayDeque<Int>()
+    private var lastKeyTime = 0L
+
+    // false = no on-screen slider at all; the ONLY way out is the secret combo.
+    // (A reboot is always the failsafe: the service restarts unlocked.)
+    private val useOnScreenSlider = false
+
     val isPendingLockActive: Boolean
         get() = pendingLockRunnable != null
 
@@ -234,33 +254,35 @@ class BabyTouchLockAccessibilityService : AccessibilityService() {
         }
 
         // ==========================================
-        // Window 2: Floating unlock slider widget
+        // Window 2: Floating unlock slider widget (only if useOnScreenSlider)
         // ==========================================
-        val inflater = LayoutInflater.from(this)
-        unlockView = inflater.inflate(R.layout.view_baby_touch_lock_unlock, null) as BabyTouchLockUnlockView
-        unlockView?.setOnUnlockConfirmedListener {
-            unlock()
-        }
-        unlockView?.resetToInitialState()
+        if (useOnScreenSlider) {
+            val inflater = LayoutInflater.from(this)
+            unlockView = inflater.inflate(R.layout.view_baby_touch_lock_unlock, null) as BabyTouchLockUnlockView
+            unlockView?.setOnUnlockConfirmedListener {
+                unlock()
+            }
+            unlockView?.resetToInitialState()
 
-        unlockViewLayoutParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_FULLSCREEN or
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.BOTTOM or Gravity.END
-            x = resources.getDimensionPixelSize(R.dimen.floating_unlock_margin_x)
-            y = resources.getDimensionPixelSize(R.dimen.floating_unlock_margin_y)
+            unlockViewLayoutParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_FULLSCREEN or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.BOTTOM or Gravity.END
+                x = resources.getDimensionPixelSize(R.dimen.floating_unlock_margin_x)
+                y = resources.getDimensionPixelSize(R.dimen.floating_unlock_margin_y)
+            }
         }
 
         try {
             wm.addView(backgroundView, backgroundViewLayoutParams)
-            wm.addView(unlockView, unlockViewLayoutParams)
+            if (unlockView != null) wm.addView(unlockView, unlockViewLayoutParams)
             backgroundView?.requestApplyInsets()
         } catch (_: Exception) {}
     }
@@ -361,6 +383,26 @@ class BabyTouchLockAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Records volume-key presses and fires [unlock] once the secret combo is matched.
+     * Only VOLUME_UP / VOLUME_DOWN count; anything else is ignored for matching.
+     */
+    private fun registerSecretKey(keyCode: Int) {
+        if (keyCode != KeyEvent.KEYCODE_VOLUME_UP && keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastKeyTime > sequenceTimeoutMs) keyBuffer.clear()
+        lastKeyTime = now
+
+        keyBuffer.addLast(keyCode)
+        while (keyBuffer.size > unlockSequence.size) keyBuffer.removeFirst()
+
+        if (keyBuffer.size == unlockSequence.size && keyBuffer.toList() == unlockSequence) {
+            keyBuffer.clear()
+            unlock()
+        }
+    }
+
     override fun onKeyEvent(event: KeyEvent): Boolean {
         if (!isLocked) {
             return super.onKeyEvent(event)
@@ -372,6 +414,9 @@ class BabyTouchLockAccessibilityService : AccessibilityService() {
             KeyEvent.KEYCODE_VOLUME_DOWN,
             KeyEvent.KEYCODE_VOLUME_UP,
             KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    registerSecretKey(event.keyCode)
+                }
                 return if (blockVolume) true else super.onKeyEvent(event)
             }
 
