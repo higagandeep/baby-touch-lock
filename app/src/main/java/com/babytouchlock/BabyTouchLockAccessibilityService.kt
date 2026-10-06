@@ -39,6 +39,7 @@ import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.widget.TextView
 import android.widget.Toast
 
 import androidx.core.content.ContextCompat
@@ -86,6 +87,11 @@ class BabyTouchLockAccessibilityService : AccessibilityService() {
     // (A reboot is always the failsafe: the service restarts unlocked.)
     private val useOnScreenSlider = false
 
+    // Fail-safe 2: a subtle, non-interactive lock indicator while locked.
+    private val showLockIndicator = true
+    private var indicatorView: TextView? = null
+    private var indicatorViewLayoutParams: WindowManager.LayoutParams? = null
+
     val isPendingLockActive: Boolean
         get() = pendingLockRunnable != null
 
@@ -94,10 +100,16 @@ class BabyTouchLockAccessibilityService : AccessibilityService() {
      */
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == Intent.ACTION_SCREEN_OFF && isLocked) {
-                if (PreferencesManager.isAutoWakePowerEnabled(this@BabyTouchLockAccessibilityService)) {
-                    // Screen turned off: trigger immediate wake-up via WakeUpActivity
-                    wakeScreenUp()
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    if (isLocked && PreferencesManager.isAutoWakePowerEnabled(this@BabyTouchLockAccessibilityService)) {
+                        // Screen turned off: trigger immediate wake-up via WakeUpActivity
+                        wakeScreenUp()
+                    }
+                }
+                // Fail-safe 1: plugging in the charger releases the lock.
+                Intent.ACTION_POWER_CONNECTED -> {
+                    if (isLocked) unlock()
                 }
             }
         }
@@ -108,7 +120,10 @@ class BabyTouchLockAccessibilityService : AccessibilityService() {
         instance = this
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_POWER_CONNECTED)
+        }
         ContextCompat.registerReceiver(this, screenStateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
 
         BabyTouchLockTileService.updateTile(this, isLocked)
@@ -280,9 +295,42 @@ class BabyTouchLockAccessibilityService : AccessibilityService() {
             }
         }
 
+        // ==========================================
+        // Window 3: Subtle non-interactive lock indicator
+        // ==========================================
+        if (showLockIndicator) {
+            val density = resources.displayMetrics.density
+            indicatorView = TextView(this).apply {
+                text = getString(R.string.lock_icon_locked)   // 🔒 glyph
+                textSize = 11f                                 // small
+                alpha = 0.28f                                  // faint
+                val p = (density * 6).toInt()
+                setPadding(p, p, p, p)
+                isFocusable = false
+                isClickable = false
+            }
+
+            indicatorViewLayoutParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.BOTTOM or Gravity.END
+                val m = (density * 8).toInt()
+                x = m
+                y = m
+            }
+        }
+
         try {
             wm.addView(backgroundView, backgroundViewLayoutParams)
             if (unlockView != null) wm.addView(unlockView, unlockViewLayoutParams)
+            if (indicatorView != null) wm.addView(indicatorView, indicatorViewLayoutParams)
             backgroundView?.requestApplyInsets()
         } catch (_: Exception) {}
     }
@@ -294,6 +342,13 @@ class BabyTouchLockAccessibilityService : AccessibilityService() {
 
         val wm = windowManager
         if (wm != null) {
+            if (indicatorView != null) {
+                try {
+                    wm.removeView(indicatorView)
+                } catch (_: Exception) {}
+                indicatorView = null
+                indicatorViewLayoutParams = null
+            }
             if (unlockView != null) {
                 try {
                     wm.removeView(unlockView)
